@@ -15,7 +15,7 @@ def render_specs_table(data):
         if isinstance(v, dict) or isinstance(v, list):
             nested[k] = v
         else:
-            rows.append({"Attribute": reformat(k), "Value": reformat(v)})
+            rows.append({"Attribute": reformat(k), "Value": str(v)})
 
     if rows:
         df = pd.DataFrame(rows)
