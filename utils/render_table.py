@@ -18,7 +18,7 @@ def render_specs_table(data):
             rows.append({"Attribute": reformat(k), "Value": str(v)})
 
     if rows:
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(rows,index=range(1, len(rows) + 1))
         st.table(df)
 
     for k, v in nested.items():
