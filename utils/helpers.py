@@ -18,10 +18,28 @@ def call_carsxe_endpoint(path: str, params: dict):
         return {"success": False, "error": "API key missing."}
 
     url = f"{BASE_URL}{path}"
-    query_params = {"key": api_key, "source": "databricks"}
-    query_params.update({k: v for k, v in params.items() if v})
+    
+    # Endpoints that need POST
+    post_endpoints = ["/v1/vinocr", "/platerecognition"]
 
     try:
-        return requests.get(url, params=query_params, timeout=30).json()
+        if path in post_endpoints:
+            # API key goes in query params for POST
+            query_params = {"key": api_key}
+            # Body uses "image_url" for plate_image_recognition or "upload_url" for vin_ocr
+            body = {}
+            if path == "/platerecognition" and "upload_url" in params:
+                body["upload_url"] = params["upload_url"]
+            elif path == "/v1/vinocr" and "upload_url" in params:
+                body["upload_url"] = params["upload_url"]
+
+            resp = requests.post(url, json=body, params=query_params, timeout=60)
+            return resp.json()
+        else:
+            # GET requests
+            query_params = {"key": api_key, "source": "databricks"}
+            query_params.update({k: v for k, v in params.items() if v})
+            resp = requests.get(url, params=query_params, timeout=30)
+            return resp.json()
     except Exception as e:
         return {"success": False, "network_error": True, "message": str(e)}

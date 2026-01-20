@@ -48,7 +48,7 @@ ENDPOINTS = {
     "Images": {
         "path": "/images",
         "required": ["make", "model"],
-        "optional": ["year", "trim", "color", "transparent", "angle", "photoType", "size", "license"]
+        "optional": ["year", "trim", "color", "transparent", "angle", "photoType", "size", "license", "format"]
     },
     "Recalls": {
         "path": "/v1/recalls", 
@@ -130,7 +130,7 @@ def endpoints_page():
                     if checked:
                         params[field] = "1"
                 else:
-                    val = st.text_input(f"{field} (optional)")
+                    val = st.text_input(f"{field}")
                     if val.strip():
                         params[field] = val.strip()
 
