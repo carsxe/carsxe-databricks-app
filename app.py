@@ -1,7 +1,9 @@
 import json
 import streamlit as st
-from dataclasses import dataclass
 import requests
+import pandas as pd
+
+BASE_URL = "https://api.carsxe.com"
 
 # ===============================
 # Session state defaults
@@ -11,13 +13,10 @@ if "api_key" not in st.session_state:
 if "api_key_valid" not in st.session_state:
     st.session_state["api_key_valid"] = False
 
-BASE_URL = "https://api.carsxe.com"
-
 # ===============================
 # Helpers
 # ===============================
 def validate_api_key(key: str) -> bool:
-    """Validate CarsXE API key via /v1/auth/validate endpoint"""
     url = f"{BASE_URL}/v1/auth/validate"
     try:
         resp = requests.get(url, params={"key": key, "source": "databricks"}, timeout=15)
@@ -26,28 +25,56 @@ def validate_api_key(key: str) -> bool:
     except Exception:
         return False
 
-def call_carsxe_endpoint(path: str, params: dict, method="GET"):
-    """Call a CarsXE endpoint with the stored API key"""
+def call_carsxe_endpoint(path: str, params: dict):
     api_key = st.session_state.get("api_key")
     if not api_key:
         return {"success": False, "error": "API key missing."}
 
     url = f"{BASE_URL}{path}"
     query_params = {"key": api_key, "source": "databricks"}
-    body_params = {}
+    query_params.update({k: v for k, v in params.items() if v})
 
-    if method.upper() == "GET":
-        query_params.update({k: v for k, v in params.items() if v})
-        try:
-            return requests.get(url, params=query_params, timeout=30).json()
-        except Exception as e:
-            return {"success": False, "network_error": True, "message": str(e)}
-    else:
-        body_params.update({k: v for k, v in params.items() if v})
-        try:
-            return requests.post(url, params=query_params, data=body_params, timeout=60).json()
-        except Exception as e:
-            return {"success": False, "network_error": True, "message": str(e)}
+    try:
+        return requests.get(url, params=query_params, timeout=30).json()
+    except Exception as e:
+        return {"success": False, "network_error": True, "message": str(e)}
+
+def reformat(value):
+    display_value = str(value)
+    display_value = display_value.replace("_", " ")
+    display_value = display_value.title()
+    return display_value
+
+# ===============================
+# Table rendering with expanders
+# ===============================
+def render_specs_table(data):
+    rows = []
+    nested = {}
+
+    for k, v in data.items():
+        if isinstance(v, dict) or isinstance(v, list):
+            nested[k] = v
+        else:
+            rows.append({"Attribute": reformat(k), "Value": str(v)})
+
+    if rows:
+        df = pd.DataFrame(rows)
+        st.table(df)  # st.table by default doesn't show the index in Streamlit
+        # لو حاب تستخدم st.dataframe مع index=False:
+        # st.dataframe(df, use_container_width=True)
+
+    for k, v in nested.items():
+        with st.expander(f"{reformat(k)}"):
+            if isinstance(v, dict):
+                render_specs_table(v)
+            elif isinstance(v, list):
+                for i, item in enumerate(v):
+                    if isinstance(item, dict):
+                        with st.expander(f"Item {i+1}"):
+                            render_specs_table(item)
+                    else:
+                        st.write(reformat(item))
 
 # ===============================
 # API Key Page
@@ -61,64 +88,64 @@ def api_key_page():
         elif validate_api_key(new_key):
             st.session_state["api_key"] = new_key
             st.session_state["api_key_valid"] = True
-            st.success("API key is valid! Redirecting to Endpoints...")
-            st.rerun()  # Databricks rerun
+            st.success("API key is valid! You can now call the Specs endpoint.")
+            st.rerun()
         else:
             st.error("Invalid API key.")
 
 # ===============================
-# API Endpoints Page
+# Specs Endpoint Page
 # ===============================
-def api_page():
-    st.header("CarsXE Endpoints")
-    endpoint_options = {
-        "Specs (VIN specs)": "/specs",
-        # يمكن إضافة باقي الـ endpoints هنا لاحقاً
+def specs_page():
+    st.header("Specs Endpoint – VIN Specifications")
+
+    vin = st.text_input("VIN (required)")
+     # Optional parameters as dropdown
+    optional_params = {
+        "deepdata": "Include extra data (slower)",
+        "disableIntVINDecoding": "Disable international VIN decoding",
+        "format": "Response format (json/xml)"
     }
 
-    label = st.selectbox("Choose endpoint", list(endpoint_options.keys()))
-    endpoint_key = endpoint_options[label]
+    selected_optionals = st.multiselect(
+        "Optional Parameters",
+        list(optional_params.keys()),
+        format_func=lambda x: optional_params[x]
+    )
 
-    params = {}
-    method = "GET"
-    required_fields = []
+    # Prepare params
+    params = {"vin": vin}
 
-    # ===========================
-    # Specs Endpoint
-    # ===========================
-    if endpoint_key == "/specs":
-        st.subheader("Specs – VIN specifications")
+    for key in selected_optionals:
+        if key == "format":
+            fmt = st.text_input("format (optional, e.g. 'json' or 'xml')", "")
+            if fmt.strip():
+                params[key] = fmt.strip()
+        else:
+            params[key] = "1"
 
-        # Required
-        vin = st.text_input("VIN (required)")
-        params["vin"] = vin
-        required_fields = ["vin"]
+    # Choose view type before call
+    view_type = st.radio("Choose response view", ["Table", "JSON"], horizontal=True)
 
-        # Optional
-        with st.expander("Optional parameters", expanded=False):
-            deepdata = st.checkbox("Deepdata (1 = extra data, slower)", value=False)
-            disable_int = st.checkbox("Disable International VIN decoding", value=False)
-            format_ = st.text_input("Format (optional, e.g. json or xml)")
+    # Initialize session_state for storing last result
+    if "specs_result" not in st.session_state:
+        st.session_state["specs_result"] = None
 
-            if deepdata:
-                params["deepdata"] = "1"
-            if disable_int:
-                params["disableIntVINDecoding"] = "1"
-            if format_.strip():
-                params["format"] = format_.strip()
-
-    # ===========================
-    # Call API Button
-    # ===========================
-    if st.button("Call endpoint"):
-        missing = [f for f in required_fields if not str(params.get(f, "")).strip()]
-        if missing:
-            st.error(f"Please fill all required fields: {', '.join(missing)}")
+    if st.button("Call Specs Endpoint"):
+        if not vin.strip():
+            st.error("VIN is required.")
         else:
             with st.spinner("Calling CarsXE API..."):
-                result = call_carsxe_endpoint(endpoint_key, params, method)
-                st.subheader("API Response")
-                st.json(result)
+                st.session_state["specs_result"] = call_carsxe_endpoint("/specs", params)
+
+    # Display the stored result
+    if st.session_state["specs_result"]:
+        st.subheader("API Response")
+        if view_type == "JSON":
+            st.json(st.session_state["specs_result"])
+        else:
+            render_specs_table(st.session_state["specs_result"])
+
 
 # ===============================
 # Main
@@ -127,7 +154,7 @@ def run_app():
     if not st.session_state.get("api_key_valid", False):
         api_key_page()
     else:
-        api_page()
+        specs_page()
 
 if __name__ == "__main__":
     run_app()
