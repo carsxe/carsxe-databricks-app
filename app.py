@@ -124,7 +124,6 @@ def endpoints_page():
     if endpoint["optional"]:
         with st.expander("Optional parameters", expanded=False):
             for field in endpoint["optional"]:
-                # لو اسم الفيلد معروف إنه Boolean (مثلاً deepdata / disableIntVINDecoding)
                 if field.lower() in ["deepdata", "disableintvindecoding"]:
                     checked = st.checkbox(f"{field}", value=False)
                     if checked:
