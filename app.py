@@ -17,6 +17,7 @@ BASE_URL = "https://api.carsxe.com"
 # Helpers
 # ===============================
 def validate_api_key(key: str) -> bool:
+    """Validate CarsXE API key via /v1/auth/validate endpoint"""
     url = f"{BASE_URL}/v1/auth/validate"
     try:
         resp = requests.get(url, params={"key": key, "source": "databricks"}, timeout=15)
@@ -26,6 +27,7 @@ def validate_api_key(key: str) -> bool:
         return False
 
 def call_carsxe_endpoint(path: str, params: dict, method="GET"):
+    """Call a CarsXE endpoint with the stored API key"""
     api_key = st.session_state.get("api_key")
     if not api_key:
         return {"success": False, "error": "API key missing."}
@@ -71,17 +73,7 @@ def api_page():
     st.header("CarsXE Endpoints")
     endpoint_options = {
         "Specs (VIN specs)": "/specs",
-        "International VIN decoder": "/v1/international-vin-decoder",
-        "Plate decoder": "/v2/platedecoder",
-        "Market value": "/v2/marketvalue",
-        "History": "/history",
-        "Images": "/images",
-        "Recalls": "/v1/recalls",
-        "Lien And Theft check": "/v1/lien-theft",
-        "Plate image recognition": "/platerecognition",
-        "VIN OCR": "/v1/vinocr",
-        "Year/Make/Model": "/v1/ymm",
-        "OBD codes decoder": "/obdcodesdecoder",
+        # يمكن إضافة باقي الـ endpoints هنا لاحقاً
     }
 
     label = st.selectbox("Choose endpoint", list(endpoint_options.keys()))
@@ -91,14 +83,33 @@ def api_page():
     method = "GET"
     required_fields = []
 
-    # هنا نكرر نفس تعريف الحقول لكل endpoint زي الكود اللي بعتهولك
-    # مثال على Specs:
+    # ===========================
+    # Specs Endpoint
+    # ===========================
     if endpoint_key == "/specs":
+        st.subheader("Specs – VIN specifications")
+
+        # Required
         vin = st.text_input("VIN (required)")
         params["vin"] = vin
         required_fields = ["vin"]
-    # باقي الحقول حسب كل endpoint كما في الكود اللي بعتهولك
 
+        # Optional
+        with st.expander("Optional parameters", expanded=False):
+            deepdata = st.checkbox("Deepdata (1 = extra data, slower)", value=False)
+            disable_int = st.checkbox("Disable International VIN decoding", value=False)
+            format_ = st.text_input("Format (optional, e.g. json or xml)")
+
+            if deepdata:
+                params["deepdata"] = "1"
+            if disable_int:
+                params["disableIntVINDecoding"] = "1"
+            if format_.strip():
+                params["format"] = format_.strip()
+
+    # ===========================
+    # Call API Button
+    # ===========================
     if st.button("Call endpoint"):
         missing = [f for f in required_fields if not str(params.get(f, "")).strip()]
         if missing:
