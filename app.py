@@ -1,7 +1,6 @@
-import json
 import streamlit as st
-import requests
-import pandas as pd
+from utils.helpers import validate_api_key, call_carsxe_endpoint
+from utils.render_table import render_specs_table
 
 BASE_URL = "https://api.carsxe.com"
 
@@ -14,67 +13,30 @@ if "api_key_valid" not in st.session_state:
     st.session_state["api_key_valid"] = False
 
 # ===============================
-# Helpers
+# Endpoints definition
 # ===============================
-def validate_api_key(key: str) -> bool:
-    url = f"{BASE_URL}/v1/auth/validate"
-    try:
-        resp = requests.get(url, params={"key": key, "source": "databricks"}, timeout=15)
-        body = resp.json()
-        return body.get("success", False)
-    except Exception:
-        return False
-
-def call_carsxe_endpoint(path: str, params: dict):
-    api_key = st.session_state.get("api_key")
-    if not api_key:
-        return {"success": False, "error": "API key missing."}
-
-    url = f"{BASE_URL}{path}"
-    query_params = {"key": api_key, "source": "databricks"}
-    query_params.update({k: v for k, v in params.items() if v})
-
-    try:
-        return requests.get(url, params=query_params, timeout=30).json()
-    except Exception as e:
-        return {"success": False, "network_error": True, "message": str(e)}
-
-def reformat(value):
-    display_value = str(value)
-    display_value = display_value.replace("_", " ")
-    display_value = display_value.title()
-    return display_value
-
-# ===============================
-# Table rendering with expanders
-# ===============================
-def render_specs_table(data):
-    rows = []
-    nested = {}
-
-    for k, v in data.items():
-        if isinstance(v, dict) or isinstance(v, list):
-            nested[k] = v
-        else:
-            rows.append({"Attribute": reformat(k), "Value": str(v)})
-
-    if rows:
-        df = pd.DataFrame(rows)
-        st.table(df)  # st.table by default doesn't show the index in Streamlit
-        # لو حاب تستخدم st.dataframe مع index=False:
-        # st.dataframe(df, use_container_width=True)
-
-    for k, v in nested.items():
-        with st.expander(f"{reformat(k)}"):
-            if isinstance(v, dict):
-                render_specs_table(v)
-            elif isinstance(v, list):
-                for i, item in enumerate(v):
-                    if isinstance(item, dict):
-                        with st.expander(f"Item {i+1}"):
-                            render_specs_table(item)
-                    else:
-                        st.write(reformat(item))
+ENDPOINTS = {
+    "Specs": {
+        "path": "/specs",
+        "required": ["vin"],
+        "optional": ["deepdata", "disableIntVINDecoding", "format"]
+    },
+    "Int VIN Decoder": {"path": "/v1/international-vin-decoder", "required": ["vin"], "optional": []},
+    "Plate Decoder": {"path": "/v2/platedecoder", "required": ["plate", "country"], "optional": ["state", "district"]},
+    "Market Value": {"path": "/v2/marketvalue", "required": ["vin"], "optional": ["state"]},
+    "History": {"path": "/history", "required": ["vin"], "optional": []},
+    "Images": {
+        "path": "/images",
+        "required": ["make", "model"],
+        "optional": ["year", "trim", "color", "transparent", "angle", "photoType", "size", "license"]
+    },
+    "Recalls": {"path": "/v1/recalls", "required": ["vin"], "optional": []},
+    "Plate Image Recognition": {"path": "/platerecognition", "required": ["upload_url"], "optional": []},
+    "VIN OCR": {"path": "/v1/vinocr", "required": ["upload_url"], "optional": []},
+    "Year/Make/Model": {"path": "/v1/ymm", "required": ["year", "make", "model"], "optional": ["trim"]},
+    "OBD Codes Decoder": {"path": "/obdcodesdecoder", "required": ["code"], "optional": []},
+    "Lien and Theft": {"path": "/v1/lien-theft", "required": ["vin"], "optional": []},
+}
 
 # ===============================
 # API Key Page
@@ -88,64 +50,42 @@ def api_key_page():
         elif validate_api_key(new_key):
             st.session_state["api_key"] = new_key
             st.session_state["api_key_valid"] = True
-            st.success("API key is valid! You can now call the Specs endpoint.")
+            st.success("API key is valid! You can now call endpoints.")
             st.rerun()
         else:
             st.error("Invalid API key.")
 
 # ===============================
-# Specs Endpoint Page
+# Endpoints Page
 # ===============================
-def specs_page():
-    st.header("Specs Endpoint – VIN Specifications")
+def endpoints_page():
+    st.header("CarsXE Endpoints")
+    endpoint_choice = st.selectbox("Choose endpoint", list(ENDPOINTS.keys()))
+    endpoint = ENDPOINTS[endpoint_choice]
 
-    vin = st.text_input("VIN (required)")
-     # Optional parameters as dropdown
-    optional_params = {
-        "deepdata": "Include extra data (slower)",
-        "disableIntVINDecoding": "Disable international VIN decoding",
-        "format": "Response format (json/xml)"
-    }
+    # Required fields
+    params = {}
+    for field in endpoint["required"]:
+        params[field] = st.text_input(f"{field} (required)")
 
-    selected_optionals = st.multiselect(
-        "Optional Parameters",
-        list(optional_params.keys()),
-        format_func=lambda x: optional_params[x]
-    )
+    # Optional fields
+    for field in endpoint["optional"]:
+        params[field] = st.text_input(f"{field} (optional)")
 
-    # Prepare params
-    params = {"vin": vin}
+    view_type = st.radio("Choose response view", ["Table", "JSON"], index=0, horizontal=True)
 
-    for key in selected_optionals:
-        if key == "format":
-            fmt = st.text_input("format (optional, e.g. 'json' or 'xml')", "")
-            if fmt.strip():
-                params[key] = fmt.strip()
-        else:
-            params[key] = "1"
-
-    # Choose view type before call
-    view_type = st.radio("Choose response view", ["Table", "JSON"], horizontal=True)
-
-    # Initialize session_state for storing last result
-    if "specs_result" not in st.session_state:
-        st.session_state["specs_result"] = None
-
-    if st.button("Call Specs Endpoint"):
-        if not vin.strip():
-            st.error("VIN is required.")
+    if st.button(f"Call {endpoint_choice} Endpoint"):
+        missing = [f for f in endpoint["required"] if not params.get(f)]
+        if missing:
+            st.error(f"Please fill all required fields: {', '.join(missing)}")
         else:
             with st.spinner("Calling CarsXE API..."):
-                st.session_state["specs_result"] = call_carsxe_endpoint("/specs", params)
-
-    # Display the stored result
-    if st.session_state["specs_result"]:
-        st.subheader("API Response")
-        if view_type == "JSON":
-            st.json(st.session_state["specs_result"])
-        else:
-            render_specs_table(st.session_state["specs_result"])
-
+                result = call_carsxe_endpoint(endpoint["path"], params)
+                st.subheader("API Response")
+                if view_type == "JSON":
+                    st.json(result)
+                else:
+                    render_specs_table(result)
 
 # ===============================
 # Main
@@ -154,7 +94,8 @@ def run_app():
     if not st.session_state.get("api_key_valid", False):
         api_key_page()
     else:
-        specs_page()
+        endpoints_page()
+
 
 if __name__ == "__main__":
     run_app()
