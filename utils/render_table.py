@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+from prettytable import PrettyTable
 
 def reformat(value):
     display_value = str(value)
@@ -15,11 +15,15 @@ def render_specs_table(data):
         if isinstance(v, dict) or isinstance(v, list):
             nested[k] = v
         else:
-            rows.append({"Attribute": reformat(k), "Value": str(v)})
+            rows.append([reformat(k), str(v)])
 
     if rows:
-        df = pd.DataFrame(rows,index=range(1, len(rows) + 1))
-        st.table(df)
+        table = PrettyTable()
+        table.field_names = ["Attribute", "Value"]
+        table.align = "l"
+        for row in rows:
+            table.add_row(row)
+        st.code(table.get_string(), language=None)
 
     for k, v in nested.items():
         with st.expander(reformat(k)):
